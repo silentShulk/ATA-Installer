@@ -5,7 +5,6 @@ import Select from "./Components/Select.vue";
 import InstallationState from "./Components/InstallationState.vue";
 import { useStateStore } from "./stores/state"
 import { useStylesStore } from "./stores/styles"
-import TitleBar from "./TitleBar.vue";
 import "./style/components/button.scss"
 import { open } from '@tauri-apps/plugin-dialog';
 import { commands } from "./bindings";
