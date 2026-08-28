@@ -20,12 +20,21 @@ pub enum StyleError {
     Toml(#[from] toml::de::Error)
 }
 
+
 #[tauri::command]
-pub fn scan_for_styles(paths: State<Paths>) -> Result<Vec<String>, String> {
-    scan_for_styles_inner(&paths).map_err(|er| er.to_string())
+pub fn get_styles(paths: State<Paths>) -> Result<(String, Vec<String>), String> {
+    get_styles_inner(&paths).map_err(|e| e.to_string())
+}
+fn get_styles_inner(paths: &Paths) -> Result<(String, Vec<String>), StyleError> {
+    let mut styles = scan_for_styles(&paths)?;
+    let selected_style = get_selected_style(paths)?;
+    
+    styles.retain(|style| style != &selected_style);
+    
+    Ok((selected_style, styles))
 }
 
-fn scan_for_styles_inner(paths: &Paths) -> Result<Vec<String>, StyleError> {
+fn scan_for_styles(paths: &Paths) -> Result<Vec<String>, StyleError> {
     let mut styles: Vec<String> = Vec::new();
 
     for entry in std::fs::read_dir(&paths.uis_dir)? {
@@ -52,12 +61,7 @@ fn scan_for_styles_inner(paths: &Paths) -> Result<Vec<String>, StyleError> {
 
     Ok(styles)
 }
-
-#[tauri::command]
-pub fn get_selected_style(paths: State<Paths>) -> Result<String, String> {
-    get_selected_style_inner(&paths).map_err(|e| e.to_string())
-}
-fn get_selected_style_inner(paths: &Paths) -> Result<String, StyleError> {
+fn get_selected_style(paths: &Paths) -> Result<String, StyleError> {
     let contents = read_to_string(&paths.settings_file)?;
     let settings: Value = from_str(&contents)?;
     Ok(settings["style"].as_str().unwrap_or("").to_string())

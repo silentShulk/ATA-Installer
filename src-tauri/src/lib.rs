@@ -10,7 +10,7 @@ mod tools_extraction;
 use checks::check_installation_state;
 use installation::{create_default_data, create_default_settings, create_folders};
 use paths::{Paths, get_paths};
-use style::{get_selected_style, scan_for_styles, set_selected_style, add_style, remove_style};
+use style::{get_styles, set_selected_style, add_style, remove_style};
 use tools_extraction::{extract_tools};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,8 +29,7 @@ pub fn run() {
         .manage(Paths::new())
         .invoke_handler(tauri::generate_handler![
             check_installation_state,
-            scan_for_styles,
-            get_selected_style,
+            get_styles,
             set_selected_style,
             create_folders,
             create_default_data,

@@ -39,6 +39,14 @@ const emit = defineEmits<{
     @input="filter"
     />
     <ul id="style-list" class="justify-center">
+        <li class="listless ata-option-big palette-dark-empty">
+            <input
+            type="radio"
+            class="palette-accent"
+            :checked=true
+            />
+            <span class="ata-h3">{{ props.selectedElement }}</span>
+        </li>
         <li
         v-for="e in filteredElements"
         :key="e"
@@ -46,8 +54,8 @@ const emit = defineEmits<{
         >
             <input
             type="radio"
+            :checked=false
             class="palette-accent"
-            :checked="e === selectedElement"
             @change="$emit('newSelection', e)"
             />
             <span class="ata-h3">{{ e }}</span>

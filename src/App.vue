@@ -20,8 +20,9 @@ async function refreshInstallationState() {
 }
 
 async function refreshStyles() {
-    stylesStore.avaiableStyles = await invoke("scan_for_styles")
-    stylesStore.selectedStyle = await invoke("get_selected_style");
+    let styles = await invoke<[string, string[]]>("get_styles");
+    stylesStore.selectedStyle = styles[0]
+    stylesStore.avaiableStyles = styles[1]
 }
 
 async function checks() {
