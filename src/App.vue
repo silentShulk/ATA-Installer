@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import Select from "./Components/Select.vue";
 import InstallationState from "./Components/InstallationState.vue";
+import TitleBar from "./Components/TitleBar.vue";
 import { useStateStore } from "./stores/state"
 import { useStylesStore } from "./stores/styles"
 import "./style/components/button.scss"
@@ -30,15 +31,20 @@ async function checks() {
 
 async function createFolders() {
     await invoke("create_folders")
-    await refreshInstallationState();
+    await refreshInstallationState()
+}
+async function createExecutable() {
+    await invoke("extract_tools")
+    await refreshInstallationState()
+    await refreshStyles()
 }
 async function createDefaultData() {
     await invoke("create_default_data")
-    await refreshInstallationState();
+    await refreshInstallationState()
 }
 async function createDefaultSettings() {
     await invoke("create_default_settings")
-    await refreshInstallationState();
+    await refreshInstallationState()
 }
 
 async function changeSelectedStyle(selectedStyle: string) {
@@ -95,6 +101,7 @@ onMounted(async () => {
 
         <InstallationState :state="stateStore.installationState"
             @create-folders="createFolders"
+            @create-executable="createExecutable"
             @create-default-data="createDefaultData"
             @create-default-settings="createDefaultSettings" />
 

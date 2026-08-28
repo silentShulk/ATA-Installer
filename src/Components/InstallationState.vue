@@ -7,6 +7,7 @@ defineProps<{
 
 const emit = defineEmits<{
     createFolders: []
+    createExecutable: []
     createDefaultData: []
     createDefaultSettings: []
 }>()
@@ -20,7 +21,7 @@ const emit = defineEmits<{
             :class="{ 'palette-enabled': state[0], 'palette-disabled': !state[0] }" @click="emit('createFolders')">
             Folders </button>
         <button id="executable" class="ata-btn-medium-small"
-            :class="{ 'palette-enabled': state[1], 'palette-disabled': !state[1] }"> Executable
+            :class="{ 'palette-enabled': state[1], 'palette-disabled': !state[1] }" @click="emit('createExecutable')"> Executable
         </button>
         <button id="data" class="ata-btn-medium-small"
             :class="{ 'palette-enabled': state[2], 'palette-disabled': !state[2] }" @click="emit('createDefaultData')">
