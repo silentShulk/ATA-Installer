@@ -19,16 +19,21 @@ const emit = defineEmits<{
     <div id="installation-components" class="ata-grid">
         <button id="folders" class="ata-btn-medium-small"
             :class="{ 'palette-enabled': state[0], 'palette-disabled': !state[0] }" @click="emit('createFolders')">
-            Folders </button>
+            <span class="ata-text"> Folders </span>
+        </button>
         <button id="executable" class="ata-btn-medium-small"
-            :class="{ 'palette-enabled': state[1], 'palette-disabled': !state[1] }" @click="emit('createExecutable')"> Executable
+            :class="{ 'palette-enabled': state[1], 'palette-disabled': !state[1] }" @click="emit('createExecutable')">
+            <span class="ata-text"> Executable </span>
         </button>
         <button id="data" class="ata-btn-medium-small"
             :class="{ 'palette-enabled': state[2], 'palette-disabled': !state[2] }" @click="emit('createDefaultData')">
-            Data File </button>
+            <span class="ata-text"> Data </span>
+        </button>
         <button id="settings" class="ata-btn-medium-small"
             :class="{ 'palette-enabled': state[3], 'palette-disabled': !state[3] }"
-            @click="emit('createDefaultSettings')"> Settings File </button>
+            @click="emit('createDefaultSettings')">
+            <span class="ata-text"> Settings </span>
+        </button>
     </div>
 </template>
 

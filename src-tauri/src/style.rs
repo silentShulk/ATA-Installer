@@ -1,12 +1,17 @@
-use std::{fs::{File, read_dir, read_to_string, rename}, path::PathBuf};
+use std::{
+    fs::{create_dir_all, read_dir, read_to_string, rename, File},
+    path::PathBuf,
+    process::Command,
+};
 
-use serde::Deserialize;
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use tauri::{AppHandle, Manager, State};
 use thiserror::Error;
 
 use serde_json::{from_str, to_writer_pretty, Value};
 
-use crate::{paths::Paths};
+use crate::paths::Paths;
 
 #[derive(Error, Debug)]
 pub enum StyleError {
@@ -17,50 +22,106 @@ pub enum StyleError {
     #[error("'{0}' is a parentless file, it is either the root folder or an empty string")]
     ParentlessFile(PathBuf),
     #[error("Couldn't read manifest file, it might be corrupted or not formatted correctly")]
-    Toml(#[from] toml::de::Error)
+    Toml(#[from] toml::de::Error),
 }
 
+/// Type of GUI, and where it lives on disk
+#[derive(Clone, Serialize, Deserialize, Type, Debug, PartialEq)]
+pub enum AppType {
+    Webapp,
+    App,
+}
+impl AppType {
+    /// Base folder for this type of GUI (`uis_dir` or `apps_dir`), before joining the GUI's own name
+    pub fn get_folder<'a>(&self, paths: &'a Paths) -> &'a PathBuf {
+        match self {
+            AppType::Webapp => &paths.uis_dir,
+            AppType::App => &paths.apps_dir,
+        }
+    }
+}
+
+/// Everything the frontend needs to display and launch a GUI.
+/// Built fresh on every scan — `executable`/`icon` are already resolved to absolute paths,
+/// so nothing downstream needs to re-derive them from `name` + `kind`.
+#[derive(Clone, Serialize, Deserialize, Type, Debug)]
+pub struct Gui {
+    pub name: String,
+    pub kind: AppType,
+    pub icon: Option<PathBuf>,
+    pub executable: PathBuf,
+}
+
+/// On-disk manifest.toml shape
+#[derive(Deserialize)]
+struct AppManifest {
+    name: String,
+    kind: AppType,
+    /// Filename of an icon image, relative to the manifest's own folder
+    icon: Option<String>,
+}
 
 #[tauri::command]
-pub fn get_styles(paths: State<Paths>) -> Result<(String, Vec<String>), String> {
-    get_styles_inner(&paths).map_err(|e| e.to_string())
+#[specta::specta]
+pub fn get_guis(paths: State<Paths>) -> Result<(Option<Gui>, Vec<Gui>), String> {
+    get_guis_inner(&paths).map_err(|e| e.to_string())
 }
-fn get_styles_inner(paths: &Paths) -> Result<(String, Vec<String>), StyleError> {
-    let mut styles = scan_for_styles(&paths)?;
-    let selected_style = get_selected_style(paths)?;
-    
-    styles.retain(|style| style != &selected_style);
-    
-    Ok((selected_style, styles))
+fn get_guis_inner(paths: &Paths) -> Result<(Option<Gui>, Vec<Gui>), StyleError> {
+    let mut guis = scan_for_guis(paths)?;
+    let selected_name = get_selected_style(paths)?;
+
+    let selected = guis
+        .iter()
+        .position(|g| g.name == selected_name)
+        .map(|i| guis.remove(i));
+
+    Ok((selected, guis))
 }
 
-fn scan_for_styles(paths: &Paths) -> Result<Vec<String>, StyleError> {
-    let mut styles: Vec<String> = Vec::new();
+fn scan_for_guis(paths: &Paths) -> Result<Vec<Gui>, StyleError> {
+    let mut guis = Vec::new();
+    scan_dir_for_guis(&paths.uis_dir, &mut guis)?;
+    scan_dir_for_guis(&paths.apps_dir, &mut guis)?;
+    Ok(guis)
+}
 
-    for entry in std::fs::read_dir(&paths.uis_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(stem) = path.file_stem() {
-                let s = stem.to_string_lossy().into_owned();
-                styles.push(s);
-            }
+/// Reads every subfolder of `dir` as a GUI folder. A folder with no/broken `manifest.toml`
+/// is skipped and logged rather than failing the whole scan — one corrupt install
+/// shouldn't hide every other GUI from the list.
+fn scan_dir_for_guis(dir: &PathBuf, guis: &mut Vec<Gui>) -> Result<(), StyleError> {
+    for entry in read_dir(dir)? {
+        let gui_folder = entry?.path();
+        if !gui_folder.is_dir() {
+            continue;
         }
-    }
 
-    for entry in read_dir(&paths.apps_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(stem) = path.file_stem() {
-                let s = stem.to_string_lossy().into_owned();
-                styles.push(s);
+        let contents = match read_to_string(gui_folder.join("manifest.toml")) {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("Skipping {gui_folder:?}: no readable manifest.toml");
+                continue;
             }
-        }
-    }
+        };
+        let manifest: AppManifest = match toml::from_str(&contents) {
+            Ok(m) => m,
+            Err(er) => {
+                eprintln!("Skipping {gui_folder:?}: bad manifest.toml. {er}");
+                continue;
+            }
+        };
 
-    Ok(styles)
+        guis.push(Gui {
+            // exe was normalized to a bare `name` (no extension) at install time,
+            // see add_gui_inner
+            executable: gui_folder.join(&manifest.name),
+            icon: manifest.icon.map(|f| gui_folder.join(f)),
+            name: manifest.name,
+            kind: manifest.kind,
+        });
+    }
+    Ok(())
 }
+
 fn get_selected_style(paths: &Paths) -> Result<String, StyleError> {
     let contents = read_to_string(&paths.settings_file)?;
     let settings: Value = from_str(&contents)?;
@@ -83,51 +144,83 @@ fn set_selected_style_inner(selected_style: String, paths: &Paths) -> Result<(),
     Ok(())
 }
 
+/// Installs a GUI: reads the manifest sitting next to the picked exe, then moves
+/// EVERY file from that source folder into `<type_dir>/<name>/`. The exe itself is
+/// renamed to a bare `name` (no extension) — extensions vary too much across
+/// platforms/formats (.exe, .AppImage, none, .sh...) to rely on for launching, and a
+/// direct full-path `Command::new(...)` spawn doesn't need one anyway. Every other
+/// file (manifest.toml, icon, ...) keeps its own original filename.
 #[tauri::command]
-pub fn add_style(path_to_new_style: PathBuf, paths: State<Paths>) -> Result<(), String> {
-    add_style_inner(path_to_new_style, &paths).map_err(|er| er.to_string())
+pub fn add_gui(path_to_new_gui: PathBuf, paths: State<Paths>) -> Result<(), String> {
+    add_gui_inner(path_to_new_gui, &paths).map_err(|er| er.to_string())
 }
-fn add_style_inner(path_to_new_style: PathBuf, paths: &Paths) -> Result<(), StyleError> {
-    let style_folder = path_to_new_style.parent()
-        .ok_or_else(|| StyleError::ParentlessFile(path_to_new_style.clone()))?;
-    let manifest_file_path = style_folder.join("manifest.toml");
+fn add_gui_inner(path_to_new_gui: PathBuf, paths: &Paths) -> Result<(), StyleError> {
+    let source_folder = path_to_new_gui
+        .parent()
+        .ok_or_else(|| StyleError::ParentlessFile(path_to_new_gui.clone()))?
+        .to_path_buf();
 
-    let contents = read_to_string(manifest_file_path)?;
+    let contents = read_to_string(source_folder.join("manifest.toml"))?;
     let manifest: AppManifest = toml::from_str(&contents)?;
 
-    let exe_type_target_folder = manifest.get_folder_by_type(paths);
-    rename(&path_to_new_style, exe_type_target_folder.join(manifest.name)).map_err(|er| {
-        StyleError::Io(er)
-    })
-}
+    let target_folder = manifest.kind.get_folder(paths).join(&manifest.name);
+    create_dir_all(&target_folder)?;
 
-#[tauri::command]
-pub fn remove_style(path_to_style_to_remove: PathBuf, paths: State<Paths>) -> Result<(), String> {
-    remove_style_inner(path_to_style_to_remove, &paths).map_err(|er| er.to_string()) 
-}
-fn remove_style_inner(path_to_style_to_remove: PathBuf, paths: &Paths) -> Result<(), StyleError> {
-    let Some(filename) = path_to_style_to_remove.file_name() else {
-        return Err(StyleError::ParentlessFile(path_to_style_to_remove))
-    };
-    rename(&path_to_style_to_remove, paths.downloads.join(filename))
-        .map_err(StyleError::Io)
-}
+    rename(&path_to_new_gui, target_folder.join(&manifest.name))?;
 
-#[derive(Deserialize)]
-struct AppManifest {
-    name: String,
-    kind: AppType
-}
-impl AppManifest {
-    fn get_folder_by_type<'a>(&self, paths: &'a Paths) -> &'a PathBuf {
-        match self.kind {
-            AppType::Webapp => &paths.uis_dir,
-            AppType::App => &paths.apps_dir,
+    for entry in read_dir(&source_folder)? {
+        let entry = entry?;
+        if entry.path() == path_to_new_gui {
+            continue; // exe already handled above, with a renamed target
         }
+        rename(entry.path(), target_folder.join(entry.file_name()))?;
     }
+
+    Ok(())
 }
-#[derive(Deserialize, Debug)]
-enum AppType {
-    Webapp,
-    App,
+
+/// `path_inside_gui_folder` only needs to be ANY file inside the GUI's folder
+/// (in practice, the exe picked via the file dialog) — its parent folder is moved.
+#[tauri::command]
+pub fn remove_gui(path_inside_gui_folder: PathBuf, paths: State<Paths>) -> Result<(), String> {
+    remove_gui_inner(path_inside_gui_folder, &paths).map_err(|er| er.to_string())
+}
+fn remove_gui_inner(path_inside_gui_folder: PathBuf, paths: &Paths) -> Result<(), StyleError> {
+    let gui_folder = path_inside_gui_folder
+        .parent()
+        .ok_or_else(|| StyleError::ParentlessFile(path_inside_gui_folder.clone()))?;
+    let folder_name = gui_folder
+        .file_name()
+        .ok_or_else(|| StyleError::ParentlessFile(gui_folder.to_path_buf()))?;
+
+    rename(gui_folder, paths.downloads.join(folder_name)).map_err(StyleError::Io)
+}
+
+/// Hides the main window, runs the GUI's executable with its own folder as cwd,
+/// then waits (off the main thread) for it to exit before showing the launcher again.
+#[tauri::command]
+pub fn launch_gui(app: AppHandle, gui: Gui) -> Result<(), String> {
+    launch_gui_inner(app, gui).map_err(|er| er.to_string())
+}
+fn launch_gui_inner(app: AppHandle, gui: Gui) -> Result<(), StyleError> {
+    let working_dir = gui.executable.parent().unwrap_or_else(|| std::path::Path::new("."));
+
+    let mut child = Command::new(&gui.executable)
+        .current_dir(working_dir)
+        .spawn()?;
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+
+    std::thread::spawn(move || {
+        let _ = child.wait();
+
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    });
+
+    Ok(())
 }

@@ -6,6 +6,7 @@ import InstallationState from "./Components/InstallationState.vue";
 import TitleBar from "./Components/TitleBar.vue";
 import { useStateStore } from "./stores/state"
 import { useStylesStore } from "./stores/styles"
+import type { Gui } from "./stores/styles";
 import "./style/components/button.scss"
 import { open } from '@tauri-apps/plugin-dialog';
 import { commands } from "./bindings";
@@ -19,15 +20,15 @@ async function refreshInstallationState() {
     stateStore.installationState = await invoke("check_installation_state");
 }
 
-async function refreshStyles() {
-    let styles = await invoke<[string, string[]]>("get_styles");
-    stylesStore.selectedStyle = styles[0]
-    stylesStore.avaiableStyles = styles[1]
+async function refreshGuis() {
+    const [selected, available] = await invoke<[Gui | null, Gui[]]>("get_guis");
+    stylesStore.selectedGui = selected;
+    stylesStore.availableGuis = available;
 }
 
 async function checks() {
     await refreshInstallationState();
-    await refreshStyles();
+    await refreshGuis();
 }
 
 async function createFolders() {
@@ -37,7 +38,7 @@ async function createFolders() {
 async function createExecutable() {
     await invoke("extract_tools")
     await refreshInstallationState()
-    await refreshStyles()
+    await refreshGuis()
 }
 async function createDefaultData() {
     await invoke("create_default_data")
@@ -48,15 +49,16 @@ async function createDefaultSettings() {
     await refreshInstallationState()
 }
 
-async function changeSelectedStyle(selectedStyle: string) {
-    await invoke('set_selected_style', { selectedStyle: selectedStyle})
-    await refreshStyles()
+async function launchGui(gui: Gui) {
+    await invoke('set_selected_style', { selectedStyle: gui.name })
+    await invoke('launch_gui', { gui })
+    await refreshGuis()
 }
 
-async function addStyle() {
+async function addGui() {
     const paths = await commands.getPaths();
 
-    const pathToNewStyle = await open({
+    const pathToNewGui = await open({
         multiple: false,
         directory: false,
         defaultPath: paths.downloads,
@@ -65,14 +67,14 @@ async function addStyle() {
             extensions: ['exe']
         }]
     });
-    await invoke('add_style', { pathToNewStyle: pathToNewStyle })
+    await invoke('add_gui', { pathToNewGui: pathToNewGui })
 
-    await refreshStyles()
+    await refreshGuis()
 }
-async function removeStyle() {
+async function removeGui() {
     const paths = await commands.getPaths();
-  
-    const pathToStyleToRemove = await open({
+
+    const pathInsideGuiFolder = await open({
         multiple: false,
         directory: false,
         defaultPath: paths.uis_dir,
@@ -81,9 +83,9 @@ async function removeStyle() {
             extensions: ['exe']
         }]
     });
-    await invoke('remove_style', { pathToStyleToRemove: pathToStyleToRemove })
-  
-    await refreshStyles()
+    await invoke('remove_gui', { pathInsideGuiFolder: pathInsideGuiFolder })
+
+    await refreshGuis()
 }
 
 onMounted(async () => {
@@ -107,11 +109,11 @@ onMounted(async () => {
             @create-default-settings="createDefaultSettings" />
 
         <main id="style" class="ata-main justify-space-evenly">
-            <button class="ata-btn-medium-big palette-dark-bad ata-h2 centered-self-v" @click="removeStyle"> Remove Style</button>
+            <button class="ata-btn-medium-big palette-dark-bad ata-h2 centered-self-v" @click="removeGui"> Remove Style</button>
             <div id="style-selector">
-                <Select :elements="stylesStore.avaiableStyles" :selectedElement="stylesStore.selectedStyle" @newSelection="changeSelectedStyle"/>
+                <Select :guis="stylesStore.availableGuis" :selectedGui="stylesStore.selectedGui" @launch="launchGui"/>
             </div>
-            <button class="ata-btn-medium-big palette-dark-good ata-h2 centered-self-v" @click="addStyle"> Add Style </button>
+            <button class="ata-btn-medium-big palette-dark-good ata-h2 centered-self-v" @click="addGui"> Add Style </button>
         </main>
     </div>
 </template>
@@ -130,7 +132,7 @@ onMounted(async () => {
     font-family: Jetbrains Mono;
 
     overflow: hidden;
-    flex: 1;         
+    flex: 1;
     min-height: 0;
 
     border: 5px solid $ata-accent;

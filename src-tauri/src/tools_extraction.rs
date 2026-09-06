@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{create_dir_all, File};
 use std::io::Write;
 use tauri::State;
 
@@ -14,6 +14,8 @@ const SHELLUI: &[u8] = include_bytes!("../embedded/shellUI-x86_64-unknown-linux-
 #[cfg(target_os = "windows")]
 const SHELLUI: &[u8] = include_bytes!("../embedded/shellUI-x86_64-pc-windows-msvc.exe");
 
+const SHELLUI_MANIFEST: &str = "name = \"ShellUI\"\nkind = \"App\"\n";
+
 #[tauri::command]
 pub fn extract_tools(paths: State<Paths>) -> Result<(), String> {
     extract_tools_inner(&paths).map_err(|er| er.to_string())
@@ -21,17 +23,23 @@ pub fn extract_tools(paths: State<Paths>) -> Result<(), String> {
 
 fn extract_tools_inner(paths: &Paths) -> Result<(), std::io::Error> {
     let mut ata = File::create(&paths.executable)?;
-    let mut shellui = File::create(&paths.apps_dir.join("ShellUI"))?;
-
     ata.write_all(ATA)?;
+
+    let shellui_folder = paths.apps_dir.join("ShellUI");
+    create_dir_all(&shellui_folder)?;
+
+    let mut shellui = File::create(shellui_folder.join("ShellUI"))?;
     shellui.write_all(SHELLUI)?;
+
+    let mut manifest = File::create(shellui_folder.join("manifest.toml"))?;
+    manifest.write_all(SHELLUI_MANIFEST.as_bytes())?;
 
     #[cfg(unix)] {
         use std::fs::{set_permissions, Permissions};
         use std::os::unix::fs::PermissionsExt;
         set_permissions(&paths.executable, Permissions::from_mode(0o755))?;
-        set_permissions(&paths.apps_dir.join("ShellUI"), Permissions::from_mode(0o755))?;
+        set_permissions(shellui_folder.join("ShellUI"), Permissions::from_mode(0o755))?;
     }
-    
-    Ok(())    
+
+    Ok(())
 }

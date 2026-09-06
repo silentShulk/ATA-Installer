@@ -7,6 +7,14 @@
 export const commands = {
 async getPaths() : Promise<Paths> {
     return await TAURI_INVOKE("get_paths");
+},
+async getGuis() : Promise<Result<[Gui | null, Gui[]], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_guis") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -20,6 +28,16 @@ async getPaths() : Promise<Paths> {
 
 /** user-defined types **/
 
+/**
+ * Type of GUI, and where it lives on disk
+ */
+export type AppType = "Webapp" | "App"
+/**
+ * Everything the frontend needs to display and launch a GUI.
+ * Built fresh on every scan — `executable`/`icon` are already resolved to absolute paths,
+ * so nothing downstream needs to re-derive them from `name` + `kind`.
+ */
+export type Gui = { name: string; kind: AppType; icon: string | null; executable: string }
 export type Paths = { executable: string; data_file: string; settings_file: string; uis_dir: string; apps_dir: string; downloads: string }
 
 /** tauri-specta globals **/
